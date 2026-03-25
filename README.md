@@ -77,7 +77,7 @@ data: {"jsonrpc":"2.0","id":1,"result":{...}}
 To parse with `jq`, extract the `data:` line first:
 
 ```bash
-curl -s -X POST http://127.0.0.1:8787/mcp \
+curl -s -X POST http://127.0.0.1:8000/mcp \
   -H "Content-Type: application/json" \
   -H "Accept: application/json, text/event-stream" \
   -H "mcp-session-id: $SESSION_ID" \
@@ -88,7 +88,7 @@ curl -s -X POST http://127.0.0.1:8787/mcp \
 ### Step 1 — Initialize session and capture session ID
 
 ```bash
-SESSION_ID=$(curl -s -D - -X POST http://127.0.0.1:8787/mcp \
+SESSION_ID=$(curl -s -D - -X POST http://127.0.0.1:8000/mcp \
   -H "Content-Type: application/json" \
   -H "Accept: application/json, text/event-stream" \
   -d '{
@@ -106,7 +106,7 @@ echo "Session ID: $SESSION_ID"
 ### Step 2 — List available tools
 
 ```bash
-curl -s -X POST http://127.0.0.1:8787/mcp \
+curl -s -X POST http://127.0.0.1:8000/mcp \
   -H "Content-Type: application/json" \
   -H "Accept: application/json, text/event-stream" \
   -H "mcp-session-id: $SESSION_ID" \
@@ -114,10 +114,10 @@ curl -s -X POST http://127.0.0.1:8787/mcp \
   | grep '^data:' | sed 's/^data: //' | jq .
 ```
 
-### Step 3 — Start a crawl
+### Step 3 — Start a crawl (all optional parameters)
 
 ```bash
-curl -s -X POST http://127.0.0.1:8787/mcp \
+curl -s -X POST http://127.0.0.1:8000/mcp \
   -H "Content-Type: application/json" \
   -H "Accept: application/json, text/event-stream" \
   -H "mcp-session-id: $SESSION_ID" \
@@ -125,7 +125,24 @@ curl -s -X POST http://127.0.0.1:8787/mcp \
     "jsonrpc": "2.0", "id": 3, "method": "tools/call",
     "params": {
       "name": "crawl_start",
-      "arguments": {"url": "https://example.com/", "limit": 3, "formats": ["markdown"]}
+      "arguments": {
+        "url": "https://www.exampledocs.com/docs/",
+        "crawl_purposes": ["search"],
+        "limit": 50,
+        "depth": 2,
+        "formats": ["markdown"],
+        "render": false,
+        "max_age": 7200,
+        "modified_since": 1704067200,
+        "source": "all",
+        "include_external_links": true,
+        "include_subdomains": true,
+        "include_patterns": ["**/api/v1/*"],
+        "exclude_patterns": ["*/learning-paths/*"],
+        "reject_resource_types": ["image", "media", "font"],
+        "goto_options": {"waitUntil": "networkidle2", "timeout": 30000},
+        "wait_for_selector": {"selector": "#content", "timeout": 5000}
+      }
     }
   }' | grep '^data:' | sed 's/^data: //' | jq .
 ```
@@ -133,7 +150,7 @@ curl -s -X POST http://127.0.0.1:8787/mcp \
 ### Step 4 — Poll status
 
 ```bash
-curl -s -X POST http://127.0.0.1:8787/mcp \
+curl -s -X POST http://127.0.0.1:8000/mcp \
   -H "Content-Type: application/json" \
   -H "Accept: application/json, text/event-stream" \
   -H "mcp-session-id: $SESSION_ID" \
@@ -146,15 +163,64 @@ curl -s -X POST http://127.0.0.1:8787/mcp \
   }' | grep '^data:' | sed 's/^data: //' | jq .
 ```
 
-### Step 5 — List all stored jobs
+### Step 5 — Crawl with AI structured extraction
+
+Requires `"json"` in `formats`. Uses Cloudflare Workers AI and incurs additional charges.
 
 ```bash
-curl -s -X POST http://127.0.0.1:8787/mcp \
+curl -s -X POST http://127.0.0.1:8000/mcp \
   -H "Content-Type: application/json" \
   -H "Accept: application/json, text/event-stream" \
   -H "mcp-session-id: $SESSION_ID" \
   -d '{
     "jsonrpc": "2.0", "id": 5, "method": "tools/call",
+    "params": {
+      "name": "crawl_and_wait",
+      "arguments": {
+        "url": "https://example.com/",
+        "formats": ["json"],
+        "limit": 5,
+        "json_options": {
+          "prompt": "Extract product names and prices",
+          "response_format": {"type": "object"}
+        },
+        "timeout": 120.0
+      }
+    }
+  }' | grep '^data:' | sed 's/^data: //' | jq .
+```
+
+### Step 6 — Crawl a password-protected site
+
+```bash
+curl -s -X POST http://127.0.0.1:8000/mcp \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -H "mcp-session-id: $SESSION_ID" \
+  -d '{
+    "jsonrpc": "2.0", "id": 6, "method": "tools/call",
+    "params": {
+      "name": "crawl_start",
+      "arguments": {
+        "url": "https://internal.example.com/docs/",
+        "authenticate": {"username": "user", "password": "pass"},
+        "extra_http_headers": {"X-API-Key": "abc123"},
+        "cookies": [{"name": "session", "value": "xyz", "domain": "internal.example.com"}],
+        "formats": ["markdown"]
+      }
+    }
+  }' | grep '^data:' | sed 's/^data: //' | jq .
+```
+
+### Step 7 — List all stored jobs
+
+```bash
+curl -s -X POST http://127.0.0.1:8000/mcp \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -H "mcp-session-id: $SESSION_ID" \
+  -d '{
+    "jsonrpc": "2.0", "id": 7, "method": "tools/call",
     "params": {
       "name": "crawl_list",
       "arguments": {}
@@ -184,6 +250,13 @@ The job is automatically saved to the local SQLite database.
 | `exclude_patterns` | list[string] | URL patterns to exclude (higher priority than include) |
 | `include_external_links` | bool | Follow links to external domains |
 | `include_subdomains` | bool | Follow links to subdomains |
+| `authenticate` | dict | HTTP auth credentials: `{"username": "...", "password": "..."}` |
+| `extra_http_headers` | dict | Custom request headers: `{"X-API-Key": "..."}` |
+| `json_options` | dict | AI extraction config (requires `"json"` in formats). Keys: `"prompt"`, `"response_format"`, `"custom_ai"` |
+| `cookies` | list[dict] | Browser cookies: `[{"name": "...", "value": "...", "domain": "..."}]` |
+| `goto_options` | dict | Navigation behaviour: `{"waitUntil": "networkidle2", "timeout": 30000}` |
+| `wait_for_selector` | dict | Wait for DOM element: `{"selector": "#content", "timeout": 5000, "visible": true}` |
+| `reject_resource_types` | list[string] | Block resource types: `"image"`, `"media"`, `"font"`, `"stylesheet"`, `"script"` |
 
 Response:
 ```json
@@ -314,3 +387,4 @@ uv run pytest -v
 - Setting `render: false` skips the headless browser and fetches static HTML — faster and currently unbilled during beta.
 - Results are retained for 14 days after a job completes. Maximum job runtime is 7 days.
 - The crawler identifies itself as `CloudflareBrowserRenderingCrawler/1.0` and cannot bypass Cloudflare protection or CAPTCHAs.
+- HTTP 429 (rate limit) responses are automatically retried with exponential backoff (up to 3 retries: 1s → 2s → 4s). The `Retry-After` response header is respected when present.
