@@ -47,7 +47,10 @@ def main() -> None:
     args = parser.parse_args()
 
     if args.transport == "streamable-http":
-        asyncio.run(_serve_http(args.host, args.port, args.shutdown_timeout))
+        try:
+            asyncio.run(_serve_http(args.host, args.port, args.shutdown_timeout))
+        except KeyboardInterrupt:
+            pass
     else:
         mcp.run(transport="stdio")
 
