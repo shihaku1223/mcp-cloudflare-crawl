@@ -106,6 +106,159 @@ class TestStartCrawl:
 
         assert exc_info.value.status_code == 401
 
+    async def test_json_options_included_in_body(
+        self, client: CloudflareCrawlClient, httpx_mock: HTTPXMock
+    ) -> None:
+        httpx_mock.add_response(
+            method="POST", url=BASE_URL, json={"success": True, "result": JOB_ID}
+        )
+
+        await client.start_crawl(
+            url="https://example.com/",
+            formats=["json"],
+            json_options={"prompt": "Extract product prices", "response_format": {"type": "object"}},
+        )
+
+        import json
+        request = httpx_mock.get_request()
+        assert request is not None
+        body = json.loads(request.content)
+        assert body["jsonOptions"] == {
+            "prompt": "Extract product prices",
+            "response_format": {"type": "object"},
+        }
+
+    async def test_authenticate_included_in_body(
+        self, client: CloudflareCrawlClient, httpx_mock: HTTPXMock
+    ) -> None:
+        httpx_mock.add_response(
+            method="POST", url=BASE_URL, json={"success": True, "result": JOB_ID}
+        )
+
+        await client.start_crawl(
+            url="https://example.com/",
+            authenticate={"username": "user", "password": "pass"},
+        )
+
+        import json
+        request = httpx_mock.get_request()
+        assert request is not None
+        body = json.loads(request.content)
+        assert body["authenticate"] == {"username": "user", "password": "pass"}
+
+    async def test_extra_http_headers_included_in_body(
+        self, client: CloudflareCrawlClient, httpx_mock: HTTPXMock
+    ) -> None:
+        httpx_mock.add_response(
+            method="POST", url=BASE_URL, json={"success": True, "result": JOB_ID}
+        )
+
+        await client.start_crawl(
+            url="https://example.com/",
+            extra_http_headers={"X-Custom-Token": "abc123"},
+        )
+
+        import json
+        request = httpx_mock.get_request()
+        assert request is not None
+        body = json.loads(request.content)
+        # Python param is extra_http_headers, wire field is setExtraHTTPHeaders
+        assert body["setExtraHTTPHeaders"] == {"X-Custom-Token": "abc123"}
+
+    async def test_cookies_included_in_body(
+        self, client: CloudflareCrawlClient, httpx_mock: HTTPXMock
+    ) -> None:
+        httpx_mock.add_response(
+            method="POST", url=BASE_URL, json={"success": True, "result": JOB_ID}
+        )
+        cookies = [{"name": "session", "value": "abc123", "domain": "example.com"}]
+
+        await client.start_crawl(url="https://example.com/", cookies=cookies)
+
+        import json
+        request = httpx_mock.get_request()
+        assert request is not None
+        body = json.loads(request.content)
+        assert body["cookies"] == cookies
+
+    async def test_goto_options_included_in_body(
+        self, client: CloudflareCrawlClient, httpx_mock: HTTPXMock
+    ) -> None:
+        httpx_mock.add_response(
+            method="POST", url=BASE_URL, json={"success": True, "result": JOB_ID}
+        )
+
+        await client.start_crawl(
+            url="https://example.com/",
+            goto_options={"waitUntil": "networkidle2", "timeout": 30000},
+        )
+
+        import json
+        request = httpx_mock.get_request()
+        assert request is not None
+        body = json.loads(request.content)
+        assert body["gotoOptions"] == {"waitUntil": "networkidle2", "timeout": 30000}
+
+    async def test_wait_for_selector_included_in_body(
+        self, client: CloudflareCrawlClient, httpx_mock: HTTPXMock
+    ) -> None:
+        httpx_mock.add_response(
+            method="POST", url=BASE_URL, json={"success": True, "result": JOB_ID}
+        )
+
+        await client.start_crawl(
+            url="https://example.com/",
+            wait_for_selector={"selector": "#content", "timeout": 5000, "visible": True},
+        )
+
+        import json
+        request = httpx_mock.get_request()
+        assert request is not None
+        body = json.loads(request.content)
+        assert body["waitForSelector"] == {
+            "selector": "#content",
+            "timeout": 5000,
+            "visible": True,
+        }
+
+    async def test_reject_resource_types_included_in_body(
+        self, client: CloudflareCrawlClient, httpx_mock: HTTPXMock
+    ) -> None:
+        httpx_mock.add_response(
+            method="POST", url=BASE_URL, json={"success": True, "result": JOB_ID}
+        )
+
+        await client.start_crawl(
+            url="https://example.com/",
+            reject_resource_types=["image", "media", "font"],
+        )
+
+        import json
+        request = httpx_mock.get_request()
+        assert request is not None
+        body = json.loads(request.content)
+        assert body["rejectResourceTypes"] == ["image", "media", "font"]
+
+    async def test_none_params_not_included_in_body(
+        self, client: CloudflareCrawlClient, httpx_mock: HTTPXMock
+    ) -> None:
+        """Optional params set to None must not appear in the request body."""
+        httpx_mock.add_response(
+            method="POST", url=BASE_URL, json={"success": True, "result": JOB_ID}
+        )
+
+        await client.start_crawl(url="https://example.com/")
+
+        import json
+        request = httpx_mock.get_request()
+        assert request is not None
+        body = json.loads(request.content)
+        for key in (
+            "jsonOptions", "authenticate", "setExtraHTTPHeaders",
+            "cookies", "gotoOptions", "waitForSelector", "rejectResourceTypes",
+        ):
+            assert key not in body
+
 
 class TestGetCrawlStatus:
     async def test_returns_running_status(

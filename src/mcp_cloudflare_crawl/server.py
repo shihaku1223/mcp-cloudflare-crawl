@@ -36,6 +36,13 @@ async def crawl_start(
     exclude_patterns: list[str] | None = None,
     include_external_links: bool | None = None,
     include_subdomains: bool | None = None,
+    authenticate: dict[str, str] | None = None,
+    extra_http_headers: dict[str, str] | None = None,
+    json_options: dict[str, Any] | None = None,
+    cookies: list[dict[str, Any]] | None = None,
+    goto_options: dict[str, Any] | None = None,
+    wait_for_selector: dict[str, Any] | None = None,
+    reject_resource_types: list[str] | None = None,
 ) -> dict[str, Any]:
     """Start an asynchronous crawl job using Cloudflare's Browser Rendering Crawl API.
 
@@ -58,6 +65,23 @@ async def crawl_start(
         exclude_patterns: URL patterns to exclude (takes priority over include_patterns).
         include_external_links: Whether to follow links to external domains.
         include_subdomains: Whether to follow links to subdomains.
+        authenticate: HTTP authentication credentials for protected sites.
+                      Example: {"username": "user", "password": "pass"}.
+        extra_http_headers: Custom HTTP headers to send with each crawl request.
+                            Example: {"X-API-Key": "abc123"}.
+        json_options: AI-based structured data extraction config (requires "json" in formats).
+                      Keys: "prompt" (str) — extraction instruction,
+                      "response_format" (dict) — JSON schema for output,
+                      "custom_ai" (dict) — custom AI model config.
+        cookies: Browser cookies to set during the crawl.
+                 Example: [{"name": "session", "value": "abc", "domain": "example.com"}].
+        goto_options: Page navigation behaviour.
+                      Keys: "waitUntil" (str) — e.g. "networkidle2", "load", "domcontentloaded";
+                      "timeout" (int) — navigation timeout in milliseconds.
+        wait_for_selector: Wait for a DOM element before scraping each page.
+                           Keys: "selector" (str), "timeout" (int, ms), "visible" (bool).
+        reject_resource_types: Resource types to block to speed up crawls and reduce cost.
+                                Values: "image", "media", "font", "stylesheet", "script", etc.
 
     Returns:
         {"job_id": "<uuid>"} — use this ID with crawl_status or crawl_cancel.
@@ -78,6 +102,13 @@ async def crawl_start(
             exclude_patterns=exclude_patterns,
             include_external_links=include_external_links,
             include_subdomains=include_subdomains,
+            authenticate=authenticate,
+            extra_http_headers=extra_http_headers,
+            json_options=json_options,
+            cookies=cookies,
+            goto_options=goto_options,
+            wait_for_selector=wait_for_selector,
+            reject_resource_types=reject_resource_types,
         )
         store = _get_store()
         await store.init()
@@ -189,6 +220,13 @@ async def crawl_and_wait(
     exclude_patterns: list[str] | None = None,
     include_external_links: bool | None = None,
     include_subdomains: bool | None = None,
+    authenticate: dict[str, str] | None = None,
+    extra_http_headers: dict[str, str] | None = None,
+    json_options: dict[str, Any] | None = None,
+    cookies: list[dict[str, Any]] | None = None,
+    goto_options: dict[str, Any] | None = None,
+    wait_for_selector: dict[str, Any] | None = None,
+    reject_resource_types: list[str] | None = None,
     poll_interval: float = 5.0,
     timeout: float = 300.0,
 ) -> dict[str, Any]:
@@ -213,6 +251,23 @@ async def crawl_and_wait(
         exclude_patterns: URL patterns to exclude (takes priority over include_patterns).
         include_external_links: Whether to follow links to external domains.
         include_subdomains: Whether to follow links to subdomains.
+        authenticate: HTTP authentication credentials for protected sites.
+                      Example: {"username": "user", "password": "pass"}.
+        extra_http_headers: Custom HTTP headers to send with each crawl request.
+                            Example: {"X-API-Key": "abc123"}.
+        json_options: AI-based structured data extraction config (requires "json" in formats).
+                      Keys: "prompt" (str) — extraction instruction,
+                      "response_format" (dict) — JSON schema for output,
+                      "custom_ai" (dict) — custom AI model config.
+        cookies: Browser cookies to set during the crawl.
+                 Example: [{"name": "session", "value": "abc", "domain": "example.com"}].
+        goto_options: Page navigation behaviour.
+                      Keys: "waitUntil" (str) — e.g. "networkidle2", "load", "domcontentloaded";
+                      "timeout" (int) — navigation timeout in milliseconds.
+        wait_for_selector: Wait for a DOM element before scraping each page.
+                           Keys: "selector" (str), "timeout" (int, ms), "visible" (bool).
+        reject_resource_types: Resource types to block to speed up crawls and reduce cost.
+                                Values: "image", "media", "font", "stylesheet", "script", etc.
         poll_interval: Seconds between status polls (default: 5.0).
         timeout: Maximum seconds to wait for completion (default: 300.0).
 
@@ -247,6 +302,13 @@ async def crawl_and_wait(
             exclude_patterns=exclude_patterns,
             include_external_links=include_external_links,
             include_subdomains=include_subdomains,
+            authenticate=authenticate,
+            extra_http_headers=extra_http_headers,
+            json_options=json_options,
+            cookies=cookies,
+            goto_options=goto_options,
+            wait_for_selector=wait_for_selector,
+            reject_resource_types=reject_resource_types,
         )
         await store.save_job(job_id=job_id, url=url)
 

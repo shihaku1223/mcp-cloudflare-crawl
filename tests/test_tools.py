@@ -93,7 +93,94 @@ class TestCrawlStart:
             exclude_patterns=None,
             include_external_links=None,
             include_subdomains=None,
+            authenticate=None,
+            extra_http_headers=None,
+            json_options=None,
+            cookies=None,
+            goto_options=None,
+            wait_for_selector=None,
+            reject_resource_types=None,
         )
+
+    async def test_passes_authenticate(self) -> None:
+        mock_client = make_mock_client()
+        mock_store = make_mock_store()
+        auth = {"username": "user", "password": "pass"}
+        with patch("mcp_cloudflare_crawl.server._get_client", return_value=mock_client), \
+             patch("mcp_cloudflare_crawl.server._get_store", return_value=mock_store):
+            await crawl_start(url="https://example.com/", authenticate=auth)
+
+        call_kwargs = mock_client.start_crawl.call_args.kwargs
+        assert call_kwargs["authenticate"] == auth
+
+    async def test_passes_extra_http_headers(self) -> None:
+        mock_client = make_mock_client()
+        mock_store = make_mock_store()
+        headers = {"X-Token": "abc123"}
+        with patch("mcp_cloudflare_crawl.server._get_client", return_value=mock_client), \
+             patch("mcp_cloudflare_crawl.server._get_store", return_value=mock_store):
+            await crawl_start(url="https://example.com/", extra_http_headers=headers)
+
+        call_kwargs = mock_client.start_crawl.call_args.kwargs
+        assert call_kwargs["extra_http_headers"] == headers
+
+    async def test_passes_json_options(self) -> None:
+        mock_client = make_mock_client()
+        mock_store = make_mock_store()
+        json_opts = {"prompt": "Extract prices", "response_format": {"type": "object"}}
+        with patch("mcp_cloudflare_crawl.server._get_client", return_value=mock_client), \
+             patch("mcp_cloudflare_crawl.server._get_store", return_value=mock_store):
+            await crawl_start(
+                url="https://example.com/", formats=["json"], json_options=json_opts
+            )
+
+        call_kwargs = mock_client.start_crawl.call_args.kwargs
+        assert call_kwargs["json_options"] == json_opts
+
+    async def test_passes_cookies(self) -> None:
+        mock_client = make_mock_client()
+        mock_store = make_mock_store()
+        cookies = [{"name": "session", "value": "abc", "domain": "example.com"}]
+        with patch("mcp_cloudflare_crawl.server._get_client", return_value=mock_client), \
+             patch("mcp_cloudflare_crawl.server._get_store", return_value=mock_store):
+            await crawl_start(url="https://example.com/", cookies=cookies)
+
+        call_kwargs = mock_client.start_crawl.call_args.kwargs
+        assert call_kwargs["cookies"] == cookies
+
+    async def test_passes_goto_options(self) -> None:
+        mock_client = make_mock_client()
+        mock_store = make_mock_store()
+        goto = {"waitUntil": "networkidle2", "timeout": 30000}
+        with patch("mcp_cloudflare_crawl.server._get_client", return_value=mock_client), \
+             patch("mcp_cloudflare_crawl.server._get_store", return_value=mock_store):
+            await crawl_start(url="https://example.com/", goto_options=goto)
+
+        call_kwargs = mock_client.start_crawl.call_args.kwargs
+        assert call_kwargs["goto_options"] == goto
+
+    async def test_passes_wait_for_selector(self) -> None:
+        mock_client = make_mock_client()
+        mock_store = make_mock_store()
+        wfs = {"selector": "#content", "timeout": 5000, "visible": True}
+        with patch("mcp_cloudflare_crawl.server._get_client", return_value=mock_client), \
+             patch("mcp_cloudflare_crawl.server._get_store", return_value=mock_store):
+            await crawl_start(url="https://example.com/", wait_for_selector=wfs)
+
+        call_kwargs = mock_client.start_crawl.call_args.kwargs
+        assert call_kwargs["wait_for_selector"] == wfs
+
+    async def test_passes_reject_resource_types(self) -> None:
+        mock_client = make_mock_client()
+        mock_store = make_mock_store()
+        with patch("mcp_cloudflare_crawl.server._get_client", return_value=mock_client), \
+             patch("mcp_cloudflare_crawl.server._get_store", return_value=mock_store):
+            await crawl_start(
+                url="https://example.com/", reject_resource_types=["image", "font"]
+            )
+
+        call_kwargs = mock_client.start_crawl.call_args.kwargs
+        assert call_kwargs["reject_resource_types"] == ["image", "font"]
 
     async def test_wraps_api_error_as_runtime_error(self) -> None:
         mock_client = make_mock_client()
@@ -318,6 +405,42 @@ class TestCrawlAndWait:
             )
 
         assert result["status"] == "cancelled_by_user"
+
+
+class TestCrawlAndWaitNewParams:
+    async def test_passes_all_new_params(self) -> None:
+        mock_client = make_mock_client()
+        mock_store = make_mock_store()
+        auth = {"username": "user", "password": "pass"}
+        headers = {"X-Token": "abc"}
+        json_opts = {"prompt": "Extract data"}
+        cookies = [{"name": "s", "value": "x"}]
+        goto = {"waitUntil": "load"}
+        wfs = {"selector": "#main"}
+        rrt = ["image", "stylesheet"]
+
+        with patch("mcp_cloudflare_crawl.server._get_client", return_value=mock_client), \
+             patch("mcp_cloudflare_crawl.server._get_store", return_value=mock_store), \
+             patch("asyncio.sleep", new_callable=AsyncMock):
+            await crawl_and_wait(
+                url="https://example.com/",
+                authenticate=auth,
+                extra_http_headers=headers,
+                json_options=json_opts,
+                cookies=cookies,
+                goto_options=goto,
+                wait_for_selector=wfs,
+                reject_resource_types=rrt,
+            )
+
+        call_kwargs = mock_client.start_crawl.call_args.kwargs
+        assert call_kwargs["authenticate"] == auth
+        assert call_kwargs["extra_http_headers"] == headers
+        assert call_kwargs["json_options"] == json_opts
+        assert call_kwargs["cookies"] == cookies
+        assert call_kwargs["goto_options"] == goto
+        assert call_kwargs["wait_for_selector"] == wfs
+        assert call_kwargs["reject_resource_types"] == rrt
 
 
 class TestCrawlList:
