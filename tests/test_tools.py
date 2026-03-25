@@ -1,0 +1,254 @@
+"""Tests for MCP tool functions via the Cloudflare client."""
+from unittest.mock import AsyncMock, patch, MagicMock
+
+import pytest
+
+from mcp_cloudflare_crawl.cloudflare_client import CloudflareAPIError
+from mcp_cloudflare_crawl.server import crawl_cancel, crawl_start, crawl_status, crawl_and_wait
+
+JOB_ID = "c7f8s2d9-a8e7-4b6e-8e4d-3d4a1b2c3f4e"
+
+COMPLETED_RESULT = {
+    "id": JOB_ID,
+    "status": "completed",
+    "total": 1,
+    "finished": 1,
+    "browserSecondsUsed": 5.0,
+    "cursor": None,
+    "records": [
+        {
+            "url": "https://example.com/",
+            "status": "completed",
+            "markdown": "# Example",
+            "metadata": {"status": 200, "title": "Example", "url": "https://example.com/"},
+        }
+    ],
+}
+
+
+def make_mock_client(
+    start_return: str = JOB_ID,
+    status_return: dict | None = None,
+    cancel_return: bool = True,
+) -> MagicMock:
+    mock = MagicMock()
+    mock.start_crawl = AsyncMock(return_value=start_return)
+    mock.get_crawl_status = AsyncMock(return_value=status_return or COMPLETED_RESULT)
+    mock.cancel_crawl = AsyncMock(return_value=cancel_return)
+    return mock
+
+
+class TestCrawlStart:
+    async def test_returns_job_id(self) -> None:
+        mock_client = make_mock_client()
+        with patch("mcp_cloudflare_crawl.server._get_client", return_value=mock_client):
+            result = await crawl_start(url="https://example.com/")
+
+        assert result == {"job_id": JOB_ID}
+
+    async def test_passes_optional_params(self) -> None:
+        mock_client = make_mock_client()
+        with patch("mcp_cloudflare_crawl.server._get_client", return_value=mock_client):
+            await crawl_start(
+                url="https://example.com/",
+                limit=5,
+                formats=["markdown"],
+                render=False,
+            )
+
+        mock_client.start_crawl.assert_called_once_with(
+            url="https://example.com/",
+            limit=5,
+            depth=None,
+            source=None,
+            formats=["markdown"],
+            render=False,
+            max_age=None,
+            modified_since=None,
+            crawl_purposes=None,
+            include_patterns=None,
+            exclude_patterns=None,
+            include_external_links=None,
+            include_subdomains=None,
+        )
+
+    async def test_wraps_api_error_as_runtime_error(self) -> None:
+        mock_client = make_mock_client()
+        mock_client.start_crawl = AsyncMock(
+            side_effect=CloudflareAPIError(400, "Invalid URL")
+        )
+        with patch("mcp_cloudflare_crawl.server._get_client", return_value=mock_client):
+            with pytest.raises(RuntimeError, match="400"):
+                await crawl_start(url="bad-url")
+
+
+class TestCrawlStatus:
+    async def test_returns_normalized_result(self) -> None:
+        mock_client = make_mock_client()
+        with patch("mcp_cloudflare_crawl.server._get_client", return_value=mock_client):
+            result = await crawl_status(job_id=JOB_ID)
+
+        assert result["id"] == JOB_ID
+        assert result["status"] == "completed"
+        assert result["total"] == 1
+        assert result["finished"] == 1
+        assert len(result["records"]) == 1
+
+    async def test_running_status(self) -> None:
+        running_result = {
+            "id": JOB_ID,
+            "status": "running",
+            "total": 10,
+            "finished": 3,
+            "browserSecondsUsed": 12.5,
+            "records": [],
+        }
+        mock_client = make_mock_client(status_return=running_result)
+        with patch("mcp_cloudflare_crawl.server._get_client", return_value=mock_client):
+            result = await crawl_status(job_id=JOB_ID)
+
+        assert result["status"] == "running"
+        assert result["finished"] == 3
+
+    async def test_errored_status(self) -> None:
+        errored_result = {
+            "id": JOB_ID,
+            "status": "errored",
+            "total": 1,
+            "finished": 0,
+            "browserSecondsUsed": 1.0,
+            "records": [],
+        }
+        mock_client = make_mock_client(status_return=errored_result)
+        with patch("mcp_cloudflare_crawl.server._get_client", return_value=mock_client):
+            result = await crawl_status(job_id=JOB_ID)
+
+        assert result["status"] == "errored"
+
+    async def test_wraps_api_error(self) -> None:
+        mock_client = make_mock_client()
+        mock_client.get_crawl_status = AsyncMock(
+            side_effect=CloudflareAPIError(404, "Job not found")
+        )
+        with patch("mcp_cloudflare_crawl.server._get_client", return_value=mock_client):
+            with pytest.raises(RuntimeError, match="404"):
+                await crawl_status(job_id="nonexistent-id")
+
+
+class TestCrawlCancel:
+    async def test_returns_success(self) -> None:
+        mock_client = make_mock_client()
+        with patch("mcp_cloudflare_crawl.server._get_client", return_value=mock_client):
+            result = await crawl_cancel(job_id=JOB_ID)
+
+        assert result == {"success": True, "job_id": JOB_ID}
+
+    async def test_wraps_api_error(self) -> None:
+        mock_client = make_mock_client()
+        mock_client.cancel_crawl = AsyncMock(
+            side_effect=CloudflareAPIError(404, "Job not found")
+        )
+        with patch("mcp_cloudflare_crawl.server._get_client", return_value=mock_client):
+            with pytest.raises(RuntimeError, match="404"):
+                await crawl_cancel(job_id="nonexistent-id")
+
+
+class TestCrawlAndWait:
+    async def test_completes_on_first_poll(self) -> None:
+        mock_client = make_mock_client()
+        with patch("mcp_cloudflare_crawl.server._get_client", return_value=mock_client):
+            with patch("asyncio.sleep", new_callable=AsyncMock):
+                result = await crawl_and_wait(
+                    url="https://example.com/",
+                    poll_interval=0.1,
+                    timeout=10.0,
+                )
+
+        assert result["status"] == "completed"
+        assert result["id"] == JOB_ID
+        assert len(result["records"]) == 1
+
+    async def test_polls_until_complete(self) -> None:
+        running = {
+            "id": JOB_ID,
+            "status": "running",
+            "total": 5,
+            "finished": 2,
+            "browserSecondsUsed": 3.0,
+            "records": [],
+        }
+        mock_client = make_mock_client()
+        mock_client.get_crawl_status = AsyncMock(side_effect=[running, running, COMPLETED_RESULT])
+
+        with patch("mcp_cloudflare_crawl.server._get_client", return_value=mock_client):
+            with patch("asyncio.sleep", new_callable=AsyncMock):
+                result = await crawl_and_wait(
+                    url="https://example.com/",
+                    poll_interval=0.1,
+                    timeout=60.0,
+                )
+
+        assert result["status"] == "completed"
+        assert mock_client.get_crawl_status.call_count == 3
+
+    async def test_raises_on_timeout(self) -> None:
+        running = {
+            "id": JOB_ID,
+            "status": "running",
+            "total": 100,
+            "finished": 1,
+            "browserSecondsUsed": 1.0,
+            "records": [],
+        }
+        mock_client = make_mock_client(status_return=running)
+
+        with patch("mcp_cloudflare_crawl.server._get_client", return_value=mock_client):
+            with patch("asyncio.sleep", new_callable=AsyncMock):
+                with pytest.raises(RuntimeError, match="did not complete"):
+                    await crawl_and_wait(
+                        url="https://example.com/",
+                        poll_interval=6.0,
+                        timeout=5.0,
+                    )
+
+    async def test_returns_on_terminal_error_status(self) -> None:
+        errored = {
+            "id": JOB_ID,
+            "status": "errored",
+            "total": 1,
+            "finished": 0,
+            "browserSecondsUsed": 1.0,
+            "records": [],
+        }
+        mock_client = make_mock_client(status_return=errored)
+
+        with patch("mcp_cloudflare_crawl.server._get_client", return_value=mock_client):
+            with patch("asyncio.sleep", new_callable=AsyncMock):
+                result = await crawl_and_wait(
+                    url="https://example.com/",
+                    poll_interval=0.1,
+                    timeout=10.0,
+                )
+
+        assert result["status"] == "errored"
+
+    async def test_returns_on_cancelled_status(self) -> None:
+        cancelled = {
+            "id": JOB_ID,
+            "status": "cancelled_by_user",
+            "total": 10,
+            "finished": 3,
+            "browserSecondsUsed": 8.0,
+            "records": [],
+        }
+        mock_client = make_mock_client(status_return=cancelled)
+
+        with patch("mcp_cloudflare_crawl.server._get_client", return_value=mock_client):
+            with patch("asyncio.sleep", new_callable=AsyncMock):
+                result = await crawl_and_wait(
+                    url="https://example.com/",
+                    poll_interval=0.1,
+                    timeout=10.0,
+                )
+
+        assert result["status"] == "cancelled_by_user"
