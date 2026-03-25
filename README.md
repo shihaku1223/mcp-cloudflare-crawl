@@ -65,11 +65,109 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS)
 }
 ```
 
+## Testing with curl
+
+The server uses **SSE (Server-Sent Events)** format. Responses look like:
+
+```
+event: message
+data: {"jsonrpc":"2.0","id":1,"result":{...}}
+```
+
+To parse with `jq`, extract the `data:` line first:
+
+```bash
+curl -s -X POST http://127.0.0.1:8787/mcp \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -H "mcp-session-id: $SESSION_ID" \
+  -d '{...}' \
+  | grep '^data:' | sed 's/^data: //' | jq .
+```
+
+### Step 1 — Initialize session and capture session ID
+
+```bash
+SESSION_ID=$(curl -s -D - -X POST http://127.0.0.1:8787/mcp \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -d '{
+    "jsonrpc": "2.0", "id": 1, "method": "initialize",
+    "params": {
+      "protocolVersion": "2024-11-05",
+      "capabilities": {},
+      "clientInfo": {"name": "curl-test", "version": "1.0"}
+    }
+  }' | grep -i '^mcp-session-id:' | awk '{print $2}' | tr -d '\r')
+
+echo "Session ID: $SESSION_ID"
+```
+
+### Step 2 — List available tools
+
+```bash
+curl -s -X POST http://127.0.0.1:8787/mcp \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -H "mcp-session-id: $SESSION_ID" \
+  -d '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' \
+  | grep '^data:' | sed 's/^data: //' | jq .
+```
+
+### Step 3 — Start a crawl
+
+```bash
+curl -s -X POST http://127.0.0.1:8787/mcp \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -H "mcp-session-id: $SESSION_ID" \
+  -d '{
+    "jsonrpc": "2.0", "id": 3, "method": "tools/call",
+    "params": {
+      "name": "crawl_start",
+      "arguments": {"url": "https://example.com/", "limit": 3, "formats": ["markdown"]}
+    }
+  }' | grep '^data:' | sed 's/^data: //' | jq .
+```
+
+### Step 4 — Poll status
+
+```bash
+curl -s -X POST http://127.0.0.1:8787/mcp \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -H "mcp-session-id: $SESSION_ID" \
+  -d '{
+    "jsonrpc": "2.0", "id": 4, "method": "tools/call",
+    "params": {
+      "name": "crawl_status",
+      "arguments": {"job_id": "YOUR_JOB_ID"}
+    }
+  }' | grep '^data:' | sed 's/^data: //' | jq .
+```
+
+### Step 5 — List all stored jobs
+
+```bash
+curl -s -X POST http://127.0.0.1:8787/mcp \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -H "mcp-session-id: $SESSION_ID" \
+  -d '{
+    "jsonrpc": "2.0", "id": 5, "method": "tools/call",
+    "params": {
+      "name": "crawl_list",
+      "arguments": {}
+    }
+  }' | grep '^data:' | sed 's/^data: //' | jq .
+```
+
 ## Tools
 
 ### `crawl_start`
 
 Submit a crawl job. Returns a `job_id` immediately — crawling happens asynchronously.
+The job is automatically saved to the local SQLite database.
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
@@ -87,15 +185,6 @@ Submit a crawl job. Returns a `job_id` immediately — crawling happens asynchro
 | `include_external_links` | bool | Follow links to external domains |
 | `include_subdomains` | bool | Follow links to subdomains |
 
-```json
-{
-  "url": "https://example.com/",
-  "limit": 20,
-  "formats": ["markdown"],
-  "render": false
-}
-```
-
 Response:
 ```json
 { "job_id": "c7f8s2d9-a8e7-4b6e-8e4d-3d4a1b2c3f4e" }
@@ -105,7 +194,7 @@ Response:
 
 ### `crawl_status`
 
-Poll the status and results of a crawl job.
+Poll the status and results of a crawl job. Also updates the job's status in the local database.
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
@@ -152,7 +241,7 @@ Cancel a running crawl job.
 
 ### `crawl_and_wait`
 
-Start a crawl and block until it completes, returning the final results. Combines `crawl_start` and `crawl_status` polling in one call.
+Start a crawl and block until it completes, returning the final results. Combines `crawl_start` and `crawl_status` polling in one call. The job is saved and status is updated in the local database throughout.
 
 Accepts all parameters from `crawl_start`, plus:
 
@@ -162,6 +251,47 @@ Accepts all parameters from `crawl_start`, plus:
 | `timeout` | float | Max seconds to wait (default: 300.0) |
 
 Use this for small crawls (a few pages). For large crawls, use `crawl_start` + `crawl_status` separately to avoid timeouts.
+
+---
+
+### `crawl_list`
+
+List all crawl jobs stored in the local SQLite database. Jobs are recorded automatically on `crawl_start` and `crawl_and_wait`, and their status is updated on every `crawl_status` or `crawl_cancel` call.
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `status_filter` | string | Filter by job status (see below) |
+| `limit` | int | Max jobs to return (default: 50) |
+| `offset` | int | Jobs to skip for pagination (default: 0) |
+
+**Job statuses:** `submitted` · `running` · `completed` · `errored` · `cancelled_due_to_timeout` · `cancelled_due_to_limits` · `cancelled_by_user`
+
+Response:
+```json
+{
+  "jobs": [
+    {
+      "job_id": "c7f8s2d9-...",
+      "url": "https://example.com/",
+      "status": "completed",
+      "created_at": "2026-03-25T00:00:00+00:00",
+      "updated_at": "2026-03-25T00:01:00+00:00"
+    }
+  ],
+  "count": 1
+}
+```
+
+## Job Database
+
+Jobs are persisted in a local SQLite database across server restarts.
+
+**Default location:** `~/.local/share/mcp-cloudflare-crawl/jobs.db`
+
+**Override with environment variable:**
+```
+MCP_DB_PATH=/path/to/custom/jobs.db
+```
 
 ## Development
 
