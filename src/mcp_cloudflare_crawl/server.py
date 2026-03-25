@@ -4,7 +4,8 @@ from typing import Any
 from mcp.server.fastmcp import FastMCP
 
 from .cloudflare_client import CloudflareAPIError, CloudflareCrawlClient
-from .config import get_account_id, get_api_token
+from .config import get_account_id, get_api_token, get_db_path
+from .db import JobStore
 
 mcp = FastMCP("mcp-cloudflare-crawl")
 
@@ -14,6 +15,10 @@ def _get_client() -> CloudflareCrawlClient:
         api_token=get_api_token(),
         account_id=get_account_id(),
     )
+
+
+def _get_store() -> JobStore:
+    return JobStore(get_db_path())
 
 
 @mcp.tool()
@@ -74,6 +79,9 @@ async def crawl_start(
             include_external_links=include_external_links,
             include_subdomains=include_subdomains,
         )
+        store = _get_store()
+        await store.init()
+        await store.save_job(job_id=job_id, url=url)
         return {"job_id": job_id}
     except CloudflareAPIError as e:
         raise RuntimeError(str(e)) from e
@@ -127,9 +135,14 @@ async def crawl_status(
             limit=limit,
             status_filter=status_filter,
         )
+        job_status = result.get("status")
+        if job_status:
+            store = _get_store()
+            await store.init()
+            await store.update_status(job_id=job_id, status=job_status)
         return {
             "id": result.get("id"),
-            "status": result.get("status"),
+            "status": job_status,
             "total": result.get("total"),
             "finished": result.get("finished"),
             "browser_seconds_used": result.get("browserSecondsUsed"),
@@ -153,6 +166,9 @@ async def crawl_cancel(job_id: str) -> dict[str, Any]:
     try:
         client = _get_client()
         await client.cancel_crawl(job_id=job_id)
+        store = _get_store()
+        await store.init()
+        await store.update_status(job_id=job_id, status="cancelled_by_user")
         return {"success": True, "job_id": job_id}
     except CloudflareAPIError as e:
         raise RuntimeError(str(e)) from e
@@ -214,6 +230,9 @@ async def crawl_and_wait(
 
     try:
         client = _get_client()
+        store = _get_store()
+        await store.init()
+
         job_id = await client.start_crawl(
             url=url,
             limit=limit,
@@ -229,6 +248,7 @@ async def crawl_and_wait(
             include_external_links=include_external_links,
             include_subdomains=include_subdomains,
         )
+        await store.save_job(job_id=job_id, url=url)
 
         elapsed = 0.0
         while elapsed < timeout:
@@ -237,6 +257,9 @@ async def crawl_and_wait(
 
             result = await client.get_crawl_status(job_id=job_id)
             status = result.get("status")
+
+            if status:
+                await store.update_status(job_id=job_id, status=status)
 
             if status in terminal_statuses:
                 return {
@@ -256,3 +279,47 @@ async def crawl_and_wait(
 
     except CloudflareAPIError as e:
         raise RuntimeError(str(e)) from e
+
+
+@mcp.tool()
+async def crawl_list(
+    status_filter: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> dict[str, Any]:
+    """List all crawl jobs stored in the local database.
+
+    Jobs are recorded automatically when crawl_start or crawl_and_wait is called.
+    Status is updated whenever crawl_status is polled.
+
+    Args:
+        status_filter: Filter by job status — one of:
+                       "submitted", "running", "completed", "errored",
+                       "cancelled_due_to_timeout", "cancelled_due_to_limits",
+                       "cancelled_by_user".
+        limit: Maximum number of jobs to return (default: 50).
+        offset: Number of jobs to skip for pagination (default: 0).
+
+    Returns:
+        {
+            "jobs": [
+                {
+                    "job_id": "...",
+                    "url": "https://...",
+                    "status": "completed",
+                    "created_at": "2026-03-25T00:00:00+00:00",
+                    "updated_at": "2026-03-25T00:01:00+00:00"
+                },
+                ...
+            ],
+            "count": <int>
+        }
+    """
+    store = _get_store()
+    await store.init()
+    jobs = await store.list_jobs(
+        status_filter=status_filter,
+        limit=limit,
+        offset=offset,
+    )
+    return {"jobs": jobs, "count": len(jobs)}

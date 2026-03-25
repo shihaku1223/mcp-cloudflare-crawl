@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 
 from dotenv import load_dotenv
 
@@ -17,3 +18,11 @@ def get_account_id() -> str:
     if not account_id:
         raise RuntimeError("CLOUDFLARE_ACCOUNT_ID environment variable is not set")
     return account_id
+
+
+def get_db_path() -> Path:
+    raw = os.environ.get("MCP_DB_PATH")
+    if raw:
+        return Path(raw)
+    default = Path.home() / ".local" / "share" / "mcp-cloudflare-crawl" / "jobs.db"
+    return default
