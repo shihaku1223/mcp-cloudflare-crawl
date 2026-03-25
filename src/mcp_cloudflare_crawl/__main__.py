@@ -1,6 +1,22 @@
 import argparse
+import asyncio
+
+import uvicorn
 
 from .server import mcp
+
+
+async def _serve_http(host: str, port: int, shutdown_timeout: int) -> None:
+    app = mcp.streamable_http_app()
+    config = uvicorn.Config(
+        app,
+        host=host,
+        port=port,
+        log_level="info",
+        timeout_graceful_shutdown=shutdown_timeout,
+    )
+    server = uvicorn.Server(config)
+    await server.serve()
 
 
 def main() -> None:
@@ -22,12 +38,16 @@ def main() -> None:
         default=8000,
         help="Port for streamable-http transport (default: 8000)",
     )
+    parser.add_argument(
+        "--shutdown-timeout",
+        type=int,
+        default=5,
+        help="Seconds to wait for active connections to close on shutdown (default: 5)",
+    )
     args = parser.parse_args()
 
     if args.transport == "streamable-http":
-        mcp.settings.host = args.host
-        mcp.settings.port = args.port
-        mcp.run(transport="streamable-http")
+        asyncio.run(_serve_http(args.host, args.port, args.shutdown_timeout))
     else:
         mcp.run(transport="stdio")
 
