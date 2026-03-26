@@ -386,3 +386,19 @@ class TestCancelCrawl:
 
         with pytest.raises(CloudflareAPIError):
             await client.cancel_crawl(job_id=JOB_ID)
+
+
+class TestClientReuse:
+    def test_http_client_stored_as_instance_attribute(self) -> None:
+        """CloudflareCrawlClient must store AsyncClient as self._http."""
+        c = CloudflareCrawlClient(api_token="tok", account_id="acc")
+        assert hasattr(c, "_http")
+        assert isinstance(c._http, httpx.AsyncClient)
+
+    def test_same_http_instance_across_multiple_accesses(self) -> None:
+        """self._http must return the same object on repeated access (not recreated)."""
+        c = CloudflareCrawlClient(api_token="tok", account_id="acc")
+        assert c._http is c._http
+        first_id = id(c._http)
+        _ = c._http  # access again
+        assert id(c._http) == first_id

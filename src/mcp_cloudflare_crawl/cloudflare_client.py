@@ -26,6 +26,7 @@ class CloudflareCrawlClient:
         }
         self._max_retries = max_retries
         self._base_retry_delay = base_retry_delay
+        self._http = httpx.AsyncClient()
 
     def _raise_for_error(self, response: httpx.Response) -> None:
         if not response.is_success:
@@ -43,19 +44,22 @@ class CloudflareCrawlClient:
         Respects the Retry-After response header when present; otherwise uses
         exponential backoff starting at base_retry_delay seconds.
         """
-        async with httpx.AsyncClient() as http:
-            response = await http.request(method, url, headers=self._headers, **kwargs)
-            for attempt in range(self._max_retries):
-                if response.status_code != 429:
-                    return response
-                retry_after = response.headers.get("Retry-After")
-                try:
-                    delay = float(retry_after) if retry_after is not None else self._base_retry_delay * (2 ** attempt)
-                except ValueError:
-                    delay = self._base_retry_delay * (2 ** attempt)
-                await asyncio.sleep(delay)
-                response = await http.request(method, url, headers=self._headers, **kwargs)
+        response = await self._http.request(method, url, headers=self._headers, **kwargs)
+        for attempt in range(self._max_retries):
+            if response.status_code != 429:
+                return response
+            retry_after = response.headers.get("Retry-After")
+            try:
+                delay = float(retry_after) if retry_after is not None else self._base_retry_delay * (2 ** attempt)
+            except ValueError:
+                delay = self._base_retry_delay * (2 ** attempt)
+            await asyncio.sleep(delay)
+            response = await self._http.request(method, url, headers=self._headers, **kwargs)
         return response
+
+    async def close(self) -> None:
+        """Close the underlying HTTP client and release connections."""
+        await self._http.aclose()
 
     async def start_crawl(
         self,
