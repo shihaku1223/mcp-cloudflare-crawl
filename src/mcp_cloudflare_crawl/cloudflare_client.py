@@ -3,13 +3,11 @@ from typing import Any
 
 import httpx
 
+from .errors import CloudflareAPIError
+
+__all__ = ["CloudflareAPIError", "CloudflareCrawlClient"]
+
 BASE_URL = "https://api.cloudflare.com/client/v4/accounts/{account_id}/browser-rendering/crawl"
-
-
-class CloudflareAPIError(Exception):
-    def __init__(self, status_code: int, message: str) -> None:
-        self.status_code = status_code
-        super().__init__(f"Cloudflare API error {status_code}: {message}")
 
 
 class CloudflareCrawlClient:
