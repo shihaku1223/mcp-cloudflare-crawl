@@ -11,9 +11,6 @@ An MCP server that exposes [Cloudflare's Browser Rendering Crawl API](https://de
 ## Setup
 
 ```bash
-git clone https://github.com/yourname/mcp-cloudflare-crawl
-cd mcp-cloudflare-crawl
-
 cp .env.example .env
 # Edit .env and fill in your credentials
 ```
@@ -39,6 +36,26 @@ uv run mcp-cloudflare-crawl --transport streamable-http
 # Listens on http://127.0.0.1:8000/mcp by default
 
 uv run mcp-cloudflare-crawl --transport streamable-http --host 0.0.0.0 --port 9000
+```
+
+## Claude Code Integration
+
+```bash
+claude mcp add \
+  --env CLOUDFLARE_API_TOKEN=your_api_token_here \
+  --env CLOUDFLARE_ACCOUNT_ID=your_account_id_here \
+  cloudflare-crawl \
+  -- uv run --directory /absolute/path/to/mcp-cloudflare-crawl mcp-cloudflare-crawl
+```
+
+Add `--scope user` to make it available across all projects:
+
+```bash
+claude mcp add --scope user \
+  --env CLOUDFLARE_API_TOKEN=your_api_token_here \
+  --env CLOUDFLARE_ACCOUNT_ID=your_account_id_here \
+  cloudflare-crawl \
+  -- uv run --directory /absolute/path/to/mcp-cloudflare-crawl mcp-cloudflare-crawl
 ```
 
 ## Claude Desktop Integration
@@ -131,9 +148,8 @@ curl -s -X POST http://127.0.0.1:8000/mcp \
         "limit": 50,
         "depth": 2,
         "formats": ["markdown"],
-        "render": false,
+        "render": true,
         "max_age": 7200,
-        "modified_since": 1704067200,
         "source": "all",
         "include_external_links": true,
         "include_subdomains": true,
@@ -388,3 +404,7 @@ uv run pytest -v
 - Results are retained for 14 days after a job completes. Maximum job runtime is 7 days.
 - The crawler identifies itself as `CloudflareBrowserRenderingCrawler/1.0` and cannot bypass Cloudflare protection or CAPTCHAs.
 - HTTP 429 (rate limit) responses are automatically retried with exponential backoff (up to 3 retries: 1s → 2s → 4s). The `Retry-After` response header is respected when present.
+
+## License
+
+[MIT](LICENSE)
