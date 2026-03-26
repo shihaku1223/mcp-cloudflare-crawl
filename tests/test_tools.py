@@ -473,7 +473,106 @@ class TestCrawlList:
         )
 
 
+import time
+
 from mcp_cloudflare_crawl.server import _normalize_status_result, _wrap_api_error, TERMINAL_STATUSES
+
+
+class TestCrawlStartValidation:
+    async def test_render_false_with_goto_options_raises(self) -> None:
+        with pytest.raises(ValueError, match="render=True"):
+            await crawl_start(
+                url="https://example.com/",
+                render=False,
+                goto_options={"waitUntil": "networkidle2"},
+            )
+
+    async def test_render_false_with_wait_for_selector_raises(self) -> None:
+        with pytest.raises(ValueError, match="render=True"):
+            await crawl_start(
+                url="https://example.com/",
+                render=False,
+                wait_for_selector={"selector": "#content"},
+            )
+
+    async def test_render_false_with_reject_resource_types_raises(self) -> None:
+        with pytest.raises(ValueError, match="render=True"):
+            await crawl_start(
+                url="https://example.com/",
+                render=False,
+                reject_resource_types=["image"],
+            )
+
+    async def test_render_true_with_browser_params_ok(self) -> None:
+        mock_client = make_mock_client()
+        mock_store = make_mock_store()
+        with patch("mcp_cloudflare_crawl.server._get_client", return_value=mock_client), \
+             patch("mcp_cloudflare_crawl.server._get_store", return_value=mock_store):
+            result = await crawl_start(
+                url="https://example.com/",
+                render=True,
+                goto_options={"waitUntil": "networkidle2"},
+                reject_resource_types=["image"],
+            )
+        assert "job_id" in result
+
+    async def test_render_none_with_browser_params_ok(self) -> None:
+        """render=None (default True) should allow browser params."""
+        mock_client = make_mock_client()
+        mock_store = make_mock_store()
+        with patch("mcp_cloudflare_crawl.server._get_client", return_value=mock_client), \
+             patch("mcp_cloudflare_crawl.server._get_store", return_value=mock_store):
+            result = await crawl_start(
+                url="https://example.com/",
+                goto_options={"waitUntil": "load"},
+            )
+        assert "job_id" in result
+
+    async def test_modified_since_older_than_one_year_raises(self) -> None:
+        old_timestamp = int(time.time()) - 366 * 24 * 3600
+        with pytest.raises(ValueError, match="modified_since"):
+            await crawl_start(
+                url="https://example.com/",
+                modified_since=old_timestamp,
+            )
+
+    async def test_modified_since_within_one_year_ok(self) -> None:
+        mock_client = make_mock_client()
+        mock_store = make_mock_store()
+        recent_timestamp = int(time.time()) - 30 * 24 * 3600  # 30 days ago
+        with patch("mcp_cloudflare_crawl.server._get_client", return_value=mock_client), \
+             patch("mcp_cloudflare_crawl.server._get_store", return_value=mock_store):
+            result = await crawl_start(
+                url="https://example.com/",
+                modified_since=recent_timestamp,
+            )
+        assert "job_id" in result
+
+
+class TestCrawlAndWaitValidation:
+    async def test_render_false_with_goto_options_raises(self) -> None:
+        with pytest.raises(ValueError, match="render=True"):
+            await crawl_and_wait(
+                url="https://example.com/",
+                render=False,
+                goto_options={"waitUntil": "networkidle2"},
+            )
+
+    async def test_render_false_with_reject_resource_types_raises(self) -> None:
+        with pytest.raises(ValueError, match="render=True"):
+            await crawl_and_wait(
+                url="https://example.com/",
+                render=False,
+                reject_resource_types=["image"],
+            )
+
+    async def test_modified_since_older_than_one_year_raises(self) -> None:
+        old_timestamp = int(time.time()) - 366 * 24 * 3600
+        with pytest.raises(ValueError, match="modified_since"):
+            await crawl_and_wait(
+                url="https://example.com/",
+                modified_since=old_timestamp,
+            )
 
 
 class TestHelpers:

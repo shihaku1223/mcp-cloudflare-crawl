@@ -1,4 +1,5 @@
 import asyncio
+import time
 from contextlib import contextmanager
 from typing import Any, Generator
 
@@ -27,6 +28,33 @@ def _normalize_status_result(result: dict[str, Any]) -> dict[str, Any]:
         "cursor": result.get("cursor"),
         "records": result.get("records", []),
     }
+
+
+def _validate_crawl_params(
+    render: bool | None,
+    goto_options: dict[str, Any] | None,
+    wait_for_selector: dict[str, Any] | None,
+    reject_resource_types: list[str] | None,
+    modified_since: int | None,
+) -> None:
+    if render is False:
+        browser_params = {
+            "goto_options": goto_options,
+            "wait_for_selector": wait_for_selector,
+            "reject_resource_types": reject_resource_types,
+        }
+        used = [k for k, v in browser_params.items() if v is not None]
+        if used:
+            raise ValueError(
+                f"{used} require render=True (headless browser). "
+                "Set render=True or omit these parameters."
+            )
+    if modified_since is not None:
+        one_year_ago = int(time.time()) - 365 * 24 * 3600
+        if modified_since < one_year_ago:
+            raise ValueError(
+                "modified_since must not be older than 1 year"
+            )
 
 
 @contextmanager
@@ -116,6 +144,7 @@ async def crawl_start(
     Returns:
         {"job_id": "<uuid>"} — use this ID with crawl_status or crawl_cancel.
     """
+    _validate_crawl_params(render, goto_options, wait_for_selector, reject_resource_types, modified_since)
     with _wrap_api_error():
         client = _get_client()
         job_id = await client.start_crawl(
@@ -291,6 +320,7 @@ async def crawl_and_wait(
         Final crawl result (same shape as crawl_status) once the job completes,
         or raises RuntimeError if the timeout is exceeded.
     """
+    _validate_crawl_params(render, goto_options, wait_for_selector, reject_resource_types, modified_since)
     with _wrap_api_error():
         client = _get_client()
         store = _get_store()
