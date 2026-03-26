@@ -1,11 +1,41 @@
 import asyncio
-from typing import Any
+from contextlib import contextmanager
+from typing import Any, Generator
 
 from mcp.server.fastmcp import FastMCP
 
 from .cloudflare_client import CloudflareAPIError, CloudflareCrawlClient
 from .config import get_account_id, get_api_token, get_db_path
 from .db import JobStore
+
+TERMINAL_STATUSES: frozenset[str] = frozenset({
+    "completed",
+    "errored",
+    "cancelled_due_to_timeout",
+    "cancelled_due_to_limits",
+    "cancelled_by_user",
+})
+
+
+def _normalize_status_result(result: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": result.get("id"),
+        "status": result.get("status"),
+        "total": result.get("total"),
+        "finished": result.get("finished"),
+        "browser_seconds_used": result.get("browserSecondsUsed"),
+        "cursor": result.get("cursor"),
+        "records": result.get("records", []),
+    }
+
+
+@contextmanager
+def _wrap_api_error() -> Generator[None, None, None]:
+    try:
+        yield
+    except CloudflareAPIError as e:
+        raise RuntimeError(str(e)) from e
+
 
 mcp = FastMCP("mcp-cloudflare-crawl")
 
@@ -86,7 +116,7 @@ async def crawl_start(
     Returns:
         {"job_id": "<uuid>"} — use this ID with crawl_status or crawl_cancel.
     """
-    try:
+    with _wrap_api_error():
         client = _get_client()
         job_id = await client.start_crawl(
             url=url,
@@ -114,8 +144,6 @@ async def crawl_start(
         await store.init()
         await store.save_job(job_id=job_id, url=url)
         return {"job_id": job_id}
-    except CloudflareAPIError as e:
-        raise RuntimeError(str(e)) from e
 
 
 @mcp.tool()
@@ -158,7 +186,7 @@ async def crawl_status(
             ]
         }
     """
-    try:
+    with _wrap_api_error():
         client = _get_client()
         result = await client.get_crawl_status(
             job_id=job_id,
@@ -171,17 +199,7 @@ async def crawl_status(
             store = _get_store()
             await store.init()
             await store.update_status(job_id=job_id, status=job_status)
-        return {
-            "id": result.get("id"),
-            "status": job_status,
-            "total": result.get("total"),
-            "finished": result.get("finished"),
-            "browser_seconds_used": result.get("browserSecondsUsed"),
-            "cursor": result.get("cursor"),
-            "records": result.get("records", []),
-        }
-    except CloudflareAPIError as e:
-        raise RuntimeError(str(e)) from e
+        return _normalize_status_result(result)
 
 
 @mcp.tool()
@@ -194,15 +212,13 @@ async def crawl_cancel(job_id: str) -> dict[str, Any]:
     Returns:
         {"success": true, "job_id": "<job_id>"}
     """
-    try:
+    with _wrap_api_error():
         client = _get_client()
         await client.cancel_crawl(job_id=job_id)
         store = _get_store()
         await store.init()
         await store.update_status(job_id=job_id, status="cancelled_by_user")
         return {"success": True, "job_id": job_id}
-    except CloudflareAPIError as e:
-        raise RuntimeError(str(e)) from e
 
 
 @mcp.tool()
@@ -275,19 +291,10 @@ async def crawl_and_wait(
         Final crawl result (same shape as crawl_status) once the job completes,
         or raises RuntimeError if the timeout is exceeded.
     """
-    terminal_statuses = {
-        "completed",
-        "errored",
-        "cancelled_due_to_timeout",
-        "cancelled_due_to_limits",
-        "cancelled_by_user",
-    }
-
-    try:
+    with _wrap_api_error():
         client = _get_client()
         store = _get_store()
         await store.init()
-
         job_id = await client.start_crawl(
             url=url,
             limit=limit,
@@ -311,36 +318,20 @@ async def crawl_and_wait(
             reject_resource_types=reject_resource_types,
         )
         await store.save_job(job_id=job_id, url=url)
-
         elapsed = 0.0
         while elapsed < timeout:
             await asyncio.sleep(poll_interval)
             elapsed += poll_interval
-
             result = await client.get_crawl_status(job_id=job_id)
             status = result.get("status")
-
             if status:
                 await store.update_status(job_id=job_id, status=status)
-
-            if status in terminal_statuses:
-                return {
-                    "id": result.get("id"),
-                    "status": status,
-                    "total": result.get("total"),
-                    "finished": result.get("finished"),
-                    "browser_seconds_used": result.get("browserSecondsUsed"),
-                    "cursor": result.get("cursor"),
-                    "records": result.get("records", []),
-                }
-
+            if status in TERMINAL_STATUSES:
+                return _normalize_status_result(result)
         raise RuntimeError(
             f"Crawl job {job_id} did not complete within {timeout}s. "
             f"Use crawl_status to continue polling."
         )
-
-    except CloudflareAPIError as e:
-        raise RuntimeError(str(e)) from e
 
 
 @mcp.tool()

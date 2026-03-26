@@ -471,3 +471,41 @@ class TestCrawlList:
         mock_store.list_jobs.assert_called_once_with(
             status_filter="completed", limit=10, offset=5
         )
+
+
+from mcp_cloudflare_crawl.server import _normalize_status_result, _wrap_api_error, TERMINAL_STATUSES
+
+
+class TestHelpers:
+    def test_normalize_status_result_maps_fields(self) -> None:
+        raw = {
+            "id": "abc",
+            "status": "completed",
+            "total": 3,
+            "finished": 3,
+            "browserSecondsUsed": 1.5,
+            "cursor": None,
+            "records": [{"url": "https://x.com"}],
+        }
+        result = _normalize_status_result(raw)
+        assert result["id"] == "abc"
+        assert result["status"] == "completed"
+        assert result["browser_seconds_used"] == 1.5
+        assert result["records"] == [{"url": "https://x.com"}]
+
+    def test_terminal_statuses_contains_expected_values(self) -> None:
+        assert "completed" in TERMINAL_STATUSES
+        assert "errored" in TERMINAL_STATUSES
+        assert "cancelled_by_user" in TERMINAL_STATUSES
+        assert "running" not in TERMINAL_STATUSES
+
+    def test_wrap_api_error_converts_cloudflare_error(self) -> None:
+        from mcp_cloudflare_crawl.errors import CloudflareAPIError
+        with pytest.raises(RuntimeError, match="Cloudflare API error 403"):
+            with _wrap_api_error():
+                raise CloudflareAPIError(403, "forbidden")
+
+    def test_wrap_api_error_passes_through_other_exceptions(self) -> None:
+        with pytest.raises(ValueError, match="other"):
+            with _wrap_api_error():
+                raise ValueError("other")
